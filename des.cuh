@@ -61,25 +61,6 @@ __device__ static void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
     L = temp;
 }
 
-__device__ static void generate_subkeys(uint64_t key, uint64_t* subkeys) {
-    uint64_t perm_key = 0;
-    for (int i = 0; i < 56; i++)
-        perm_key |= ((key >> (64 - PC1[i])) & 1ULL) << (55 - i);
-
-    uint32_t C = (perm_key >> 28) & 0x0FFFFFFF;
-    uint32_t D = perm_key & 0x0FFFFFFF;
-
-    for (int i = 0; i < 16; i++) {
-        C = ((C << SHIFTS[i]) | (C >> (28 - SHIFTS[i]))) & 0x0FFFFFFF;
-        D = ((D << SHIFTS[i]) | (D >> (28 - SHIFTS[i]))) & 0x0FFFFFFF;
-        uint64_t CD = (((uint64_t)C) << 28) | D;
-        uint64_t subkey = 0;
-        for (int j = 0; j < 48; j++)
-            subkey |= ((CD >> (56 - PC2[j])) & 1ULL) << (47 - j);
-        subkeys[i] = subkey;
-    }
-}
-
 __device__ static uint64_t des_encrypt(uint64_t block, uint64_t* subkeys) {
     apply_permutation(block, IP, 64);
     uint32_t L = (block >> 32) & 0xFFFFFFFF;
