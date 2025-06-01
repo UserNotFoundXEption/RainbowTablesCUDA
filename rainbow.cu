@@ -28,44 +28,41 @@ __device__ void block_to_pw(uint64_t block, char* out) {
     out[PW_LEN] = '\0';
 }
 
-__device__ void reduce(uint64_t block, int round, char* out) {
+__device__ uint64_t reduce(uint64_t block, int round) {
+    uint64_t result = 0;
     for (int i = 0; i < PW_LEN; i++) {
         uint8_t byte = (block >> (8 * (i % 8))) & 0xFF;
         int idx = (byte + round + i) % 26;
-        out[i] = ALPHABET[idx];
+        result |= ((uint64_t)ALPHABET[idx]) << ((PW_LEN - 1 - i) * 8);
     }
-    out[PW_LEN] = '\0';
+    return result;
 }
 
-__global__ void kernel(char* out, int total_chains, uint64_t key) {
+__global__ void kernel(uint64_t* out, int total_chains) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= total_chains) return;
 
-    char pw[PW_LEN + 1], red[PW_LEN + 1];
-
-    // Start password = "aaaaaa" + id (w ascii)
-    for (int i = 0; i < PW_LEN; i++) pw[i] = 'a';
+    uint64_t pw = 0;
+    for (int i = 0; i < PW_LEN; i++) {
+        pw |= ((uint64_t)'a') << ((PW_LEN - 1 - i) * 8);
+    }
     int n = id;
     for (int i = PW_LEN - 1; i >= 0 && n > 0; i--) {
-        pw[i] += n % 26;
+        int shift = (PW_LEN - 1 - i) * 8;
+        uint8_t c = ((pw >> shift) & 0xFF) + (n % 26);
+        pw = (pw & ~(0xFFULL << shift)) | ((uint64_t)c << shift);
         n /= 26;
     }
-    pw[PW_LEN] = '\0';
 
-    char start[PW_LEN + 1];
-    memcpy(start, pw, PW_LEN + 1);
+    uint64_t start = pw;
 
     for (int i = 0; i < CHAIN_LEN; i++) {
-        uint64_t blk = text_to_block(pw);
-        blk = des_encrypt(blk, subkeys);
-        reduce(blk, i, red);
-        memcpy(pw, red, PW_LEN + 1);
-	pw[PW_LEN] = '\0';
+        pw = des_encrypt(pw, subkeys);
+        pw = reduce(pw, i);
     }
 
-    int idx = id * 2 * PW_LEN;
-    memcpy(&out[idx], start, PW_LEN);
-    memcpy(&out[idx + PW_LEN], pw, PW_LEN);
+    out[id * 2] = start;
+    out[id * 2 + 1] = pw;
 }
 
 void printOccupancy() {
@@ -128,15 +125,15 @@ int main(int argc, char** argv) {
 
     int threads = (total_chains + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
     size_t size = total_chains * 2 * PW_LEN;
-    char* d_out;
-    cudaMalloc(&d_out, size);
-
+    uint64_t* d_out;
+    cudaMalloc(&d_out, sizeof(uint64_t) * total_chains * 2);
+    
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
 
-    kernel<<<threads, THREADS_PER_BLOCK>>>(d_out, total_chains, key);
+    kernel<<<threads, THREADS_PER_BLOCK>>>(d_out, total_chains);
 
     cudaDeviceSynchronize();    
     cudaEventRecord(stop, 0);

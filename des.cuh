@@ -3,33 +3,29 @@
 #include <cuda.h>
 #include "des_tables.cuh"
 
-__device__ static void apply_permutation(uint64_t& block, const int* table, int n) {
+__device__ uint64_t apply_permutation(uint64_t block, const int* table) {
     uint64_t res = 0;
-    for (int i = 0; i < n; i++) {
+    #pragma unroll 63
+    for (int i = 0; i < 64; i++) {
         int pos = table[i] - 1;
         res |= ((block >> (63 - pos)) & 1ULL) << (63 - i);
     }
-    block = res;
+    return res;
 }
 
-__device__ static void initial_perm(uint64_t& block) { 
-    apply_permutation(block, IP, 64);
-}
-
-__device__ static void final_perm(uint64_t& block) {
-    apply_permutation(block, FP, 64);
-}
-
-__device__ static void expand(uint32_t R, uint64_t& ER) {
-    ER = 0;
+__device__ uint64_t expand(uint32_t R) {
+    uint64_t ER = 0;
+    #pragma unroll
     for(int i = 0; i < 48; i++) {
         int bitpos = 32 - E[i]; // DES indeksuje od 1
-        ER |= ((uint64_t)((R >> bitpos) & 1)) << (47 - i);
+        ER |= ((uint64_t)((R >> bitpos) & 1U)) << (47 - i);
     }
+    return ER;
 }
 
-__device__ static uint32_t sbox_substitution(uint64_t ER) {
+__device__ uint32_t sbox_substitution(uint64_t ER) {
     uint32_t output = 0;
+    #pragma unroll
     for (int i = 0; i < 8; i++) {
         // Wyciągamy 6-bit fragment
         int shift = 42 - (i * 6);
@@ -42,8 +38,8 @@ __device__ static uint32_t sbox_substitution(uint64_t ER) {
         output |= ((uint32_t)s_out) << (28 - 4 * i);
     }
 
-    // Permutacja P (32 bitów)
     uint32_t permuted = 0;
+    #pragma unroll
     for (int i = 0; i < 32; i++) {
         int bit = (output >> (32 - P[i])) & 0x01;
         permuted |= bit << (31 - i);
@@ -52,8 +48,8 @@ __device__ static uint32_t sbox_substitution(uint64_t ER) {
     return permuted;
 }
 
-__device__ static void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
-    uint64_t ER; expand(R, ER);
+__device__ void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
+    uint64_t ER = expand(R);
     ER ^= subkey;
     uint32_t f = sbox_substitution(ER);
     uint32_t temp = R;
@@ -61,13 +57,13 @@ __device__ static void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
     L = temp;
 }
 
-__device__ static uint64_t des_encrypt(uint64_t block, uint64_t* subkeys) {
-    apply_permutation(block, IP, 64);
+__device__ uint64_t des_encrypt(uint64_t block, uint64_t* subkeys) {
+    block = apply_permutation(block, IP);
     uint32_t L = (block >> 32) & 0xFFFFFFFF;
     uint32_t R = block & 0xFFFFFFFF;
     for (int i = 0; i < 16; i++)
         des_round(L, R, subkeys[i]);
-    uint64_t preout = ((uint64_t)R << 32) | L;
-    apply_permutation(preout, FP, 64);
-    return preout;
+    block = ((uint64_t)R << 32) | L;
+    block = apply_permutation(block, FP);
+    return block;
 }
