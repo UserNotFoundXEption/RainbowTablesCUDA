@@ -15,19 +15,6 @@ int PC1_host[56];
 int SHIFTS_host[16];
 int PC2_host[48];
 
-__device__ uint64_t text_to_block(const char* pw) {
-    uint64_t block = 0;
-    for (int i = 0; i < PW_LEN; i++)
-        block |= ((uint64_t)pw[i]) << ((PW_LEN - 1 - i) * 8);
-    return block;
-}
-
-__device__ void block_to_pw(uint64_t block, char* out) {
-    for (int i = 0; i < PW_LEN; i++)
-        out[i] = (block >> ((PW_LEN - 1 - i) * 8)) & 0xFF;
-    out[PW_LEN] = '\0';
-}
-
 __device__ uint64_t reduce(uint64_t block, int round) {
     uint64_t result = 0;
     for (int i = 0; i < PW_LEN; i++) {
