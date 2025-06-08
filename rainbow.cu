@@ -20,7 +20,7 @@ __device__ uint64_t reduce(uint64_t block, int round) {
     for (int i = 0; i < PW_LEN; i++) {
         uint8_t byte = (block >> (8 * (i % 8))) & 0xFF;
         int idx = (byte + round + i) % 26;
-        result |= ((uint64_t)ALPHABET[idx]) << ((PW_LEN - 1 - i) * 8);
+        result |= ((uint64_t)('a' + idx)) << ((PW_LEN - 1 - i) * 8);
     }
     return result;
 }
@@ -42,7 +42,6 @@ __global__ void kernel(uint64_t* out, int total_chains) {
     }
 
     uint64_t start = pw;
-
     for (int i = 0; i < CHAIN_LEN; i++) {
         pw = des_encrypt(pw, subkeys);
         pw = reduce(pw, i);
@@ -50,27 +49,6 @@ __global__ void kernel(uint64_t* out, int total_chains) {
 
     out[id * 2] = start;
     out[id * 2 + 1] = pw;
-}
-
-void printOccupancy() {
-    int device;
-    cudaGetDevice(&device);
-    cudaDeviceProp prop;
-    cudaGetDeviceProperties(&prop, device);
-
-    int numBlocksPerSM = 0;
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(
-        &numBlocksPerSM,
-        kernel,
-        THREADS_PER_BLOCK,
-        0
-    );
-
-    int activeThreadsPerSM = numBlocksPerSM * THREADS_PER_BLOCK;
-    int maxThreadsPerSM = prop.maxThreadsPerMultiProcessor;
-
-    float occupancy = 100.0f * activeThreadsPerSM / maxThreadsPerSM;
-    printf("Occupancy: %.2f%%\nMax: %d\nActive: %d\n", occupancy, maxThreadsPerSM, activeThreadsPerSM);
 }
 
 void generate_subkeys(uint64_t key, uint64_t* subkeys) {
@@ -134,7 +112,6 @@ int main(int argc, char** argv) {
     float ms = 0;
     cudaEventElapsedTime(&ms, start, stop);
     printf("GPU dzilal przez %f sekund.\n", ms / 1000.0);
-    printOccupancy();
 
     char* h_out = new char[size];
     cudaMemcpy(h_out, d_out, size, cudaMemcpyDeviceToHost);
@@ -144,7 +121,7 @@ int main(int argc, char** argv) {
 		fputc(':', f);
 		for (int j = 0; j < PW_LEN; j++) fputc(h_out[i * 2 * PW_LEN + PW_LEN + j], f);
 		fputc('\n', f);
-    }
+    } 
     fclose(f);
     delete[] h_out;
     cudaFree(d_out);

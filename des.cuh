@@ -13,7 +13,7 @@ __device__ uint64_t apply_permutation(uint64_t block, const int* table) {
     return res;
 }
 
-__device__ uint64_t expand(uint32_t R) {
+__device__  uint64_t expand(uint32_t R) {
     uint64_t ER = 0;
     #pragma unroll
     for(int i = 0; i < 48; i++) {
@@ -23,7 +23,7 @@ __device__ uint64_t expand(uint32_t R) {
     return ER;
 }
 
-__device__ uint32_t sbox_substitution(uint64_t ER) {
+__device__  uint32_t sbox_substitution(uint64_t ER) {
     uint32_t output = 0;
     #pragma unroll
     for (int i = 0; i < 8; i++) {
@@ -48,7 +48,7 @@ __device__ uint32_t sbox_substitution(uint64_t ER) {
     return permuted;
 }
 
-__device__ void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
+__device__  void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
     uint64_t ER = expand(R);
     ER ^= subkey;
     uint32_t f = sbox_substitution(ER);
@@ -57,7 +57,7 @@ __device__ void des_round(uint32_t& L, uint32_t& R, uint64_t subkey) {
     L = temp;
 }
 
-__device__ uint64_t des_encrypt(uint64_t block, uint64_t* subkeys) {
+__device__  uint64_t des_encrypt(uint64_t block, const uint64_t* __restrict__ subkeys) {
     block = apply_permutation(block, IP);
     uint32_t L = (block >> 32) & 0xFFFFFFFF;
     uint32_t R = block & 0xFFFFFFFF;
