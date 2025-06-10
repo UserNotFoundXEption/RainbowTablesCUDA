@@ -111,7 +111,7 @@ int main(int argc, char** argv) {
 
     float ms = 0;
     cudaEventElapsedTime(&ms, start, stop);
-    printf("GPU dzilal przez %f sekund.\n", ms / 1000.0);
+    printf("GPU dzialal przez %f sekund.\n", ms / 1000.0);
 
     char* h_out = new char[size];
     cudaMemcpy(h_out, d_out, size, cudaMemcpyDeviceToHost);
