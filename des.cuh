@@ -15,9 +15,8 @@ __device__ uint64_t apply_permutation(uint64_t block, const int* table) {
 
 __device__  uint64_t expand(uint32_t R) {
     uint64_t ER = 0;
-    #pragma unroll
     for(int i = 0; i < 48; i++) {
-        int bitpos = 32 - E[i]; // DES indeksuje od 1
+        int bitpos = 32 - E[i];
         ER |= ((uint64_t)((R >> bitpos) & 1U)) << (47 - i);
     }
     return ER;
@@ -25,9 +24,7 @@ __device__  uint64_t expand(uint32_t R) {
 
 __device__  uint32_t sbox_substitution(uint64_t ER) {
     uint32_t output = 0;
-    #pragma unroll
     for (int i = 0; i < 8; i++) {
-        // Wyciągamy 6-bit fragment
         int shift = 42 - (i * 6);
         uint8_t chunk = (ER >> shift) & 0x3F;
 
@@ -39,7 +36,6 @@ __device__  uint32_t sbox_substitution(uint64_t ER) {
     }
 
     uint32_t permuted = 0;
-    #pragma unroll
     for (int i = 0; i < 32; i++) {
         int bit = (output >> (32 - P[i])) & 0x01;
         permuted |= bit << (31 - i);

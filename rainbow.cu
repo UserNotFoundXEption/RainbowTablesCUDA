@@ -5,8 +5,6 @@
 #include "des_tables.cuh"
 
 #define PW_LEN 8
-#define CHAIN_LEN 10000
-#define THREADS_PER_BLOCK 256
 #define ALPHABET "abcdefghijklmnopqrstuvwxyz"
 
 __device__ __constant__ uint64_t subkeys[16];
@@ -25,7 +23,7 @@ __device__ uint64_t reduce(uint64_t block, int round) {
     return result;
 }
 
-__global__ void kernel(uint64_t* out, int total_chains) {
+__global__ void kernel(uint64_t* out, int total_chains, int chain_len) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= total_chains) return;
 
@@ -42,7 +40,7 @@ __global__ void kernel(uint64_t* out, int total_chains) {
     }
 
     uint64_t start = pw;
-    for (int i = 0; i < CHAIN_LEN; i++) {
+    for (int i = 0; i < chain_len; i++) {
         pw = des_encrypt(pw, subkeys);
         pw = reduce(pw, i);
     }
@@ -72,8 +70,8 @@ void generate_subkeys(uint64_t key, uint64_t* subkeys) {
 
 
 int main(int argc, char** argv) {
-    if (argc < 3) {
-        printf("Użycie: %s <liczba_łańcuchów> <klucz_hex>\n", argv[0]);
+    if (argc < 5) {
+        printf("Użycie: %s <liczba_łańcuchów> <dlugosc_lancucha> <klucz_hex> <watki_na_blok>\n", argv[0]);
         return 1;
     }
     
@@ -82,13 +80,15 @@ int main(int argc, char** argv) {
     cudaMemcpyToSymbol(PC2, PC2_host, sizeof(PC2_host));
     
     int total_chains = atoi(argv[1]);
-    uint64_t key = strtoull(argv[2], NULL, 16);
+    int chain_len = atoi(argv[2]);
+    uint64_t key = strtoull(argv[3], NULL, 16);
+    int threads_per_block = atoi(argv[4]);
     
     uint64_t h_subkeys[16];
     generate_subkeys(key, h_subkeys);
     cudaMemcpyToSymbol(subkeys, h_subkeys, sizeof(uint64_t) * 16);
 
-    int threads = (total_chains + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+    int blocks = (total_chains + threads_per_block - 1) / threads_per_block;
     size_t size = total_chains * 2 * PW_LEN;
     uint64_t* d_out;
     cudaMalloc(&d_out, sizeof(uint64_t) * total_chains * 2);
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     cudaEventCreate(&stop);
     cudaEventRecord(start, 0);
 
-    kernel<<<threads, THREADS_PER_BLOCK>>>(d_out, total_chains);
+    kernel<<<blocks, threads_per_block>>>(d_out, total_chains, chain_len);
 
     cudaDeviceSynchronize();    
     cudaEventRecord(stop, 0);
