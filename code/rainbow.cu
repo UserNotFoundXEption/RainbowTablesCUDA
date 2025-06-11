@@ -1,6 +1,7 @@
 #include <cstdio>
 #include <cstring>
-#include <stdint.h> 
+#include <stdint.h>
+#include <new> 
 #include <getopt.h>
 #include "des.cuh"
 #include "des_tables.cuh"
@@ -111,23 +112,52 @@ int main(int argc, char** argv) {
     }
 
     int total_chains = atoi(argv[optind]);
-    int chain_len = atoi(argv[optind + 1]);
-    uint64_t key = strtoull(argv[optind + 2], NULL, 16);
-    int threads_per_block = sequential ? 1 : atoi(argv[optind + 3]);
+    if(total_chains <= 0) {
+	printf("Nieprawidłowa liczba łańcuchów. Wybierz liczbę większą niż 0.\n");
+	return 2;
+    }
 
-    cudaMemcpyToSymbol(PC1, PC1_host, sizeof(PC1_host));
-    cudaMemcpyToSymbol(SHIFTS, SHIFTS_host, sizeof(SHIFTS_host));
-    cudaMemcpyToSymbol(PC2, PC2_host, sizeof(PC2_host));
+    int chain_len = atoi(argv[optind + 1]);
+    if(chain_len <= 0) {
+        printf("Nieprawidłowa długość łańcuchów. Wybierz liczbę większą niż 0.\n");
+        return 3;
+    }
+ 
+    uint64_t key = 0;
+    if (sscanf(argv[optind + 2], "%lx", &key) != 1) {
+        fprintf(stderr, "Nieprawidłowy klucz w formacie szesnastkowym.\n");
+        return 4;
+    }
+    
+    int threads_per_block = sequential ? 1 : atoi(argv[optind + 3]);
+    if(threads_per_block > 256 || threads_per_block <= 0) {
+        printf("Nieprawidłowa liczba wątków na blok. Wybierz liczbę z przedziału <1, 256>.\n");
+	return 5;
+    }
+
+    cudaError_t err;
+    if ((err = cudaMemcpyToSymbol(PC1, PC1_host, sizeof(PC1_host))) != cudaSuccess ||
+        (err = cudaMemcpyToSymbol(SHIFTS, SHIFTS_host, sizeof(SHIFTS_host))) != cudaSuccess ||
+        (err = cudaMemcpyToSymbol(PC2, PC2_host, sizeof(PC2_host))) != cudaSuccess) {
+        fprintf(stderr, "Błąd kopiowania tablic do GPU: %s\n", cudaGetErrorString(err));
+        return 6;
+    }
 
     uint64_t h_subkeys[16];
     generate_subkeys(key, h_subkeys);
-    cudaMemcpyToSymbol(subkeys, h_subkeys, sizeof(uint64_t) * 16);
+    if ((err = cudaMemcpyToSymbol(subkeys, h_subkeys, sizeof(h_subkeys))) != cudaSuccess) {
+        fprintf(stderr, "Błąd kopiowania kluczy do GPU: %s\n", cudaGetErrorString(err));
+        return 7;
+    }
 
     int blocks = sequential ? 1 : (total_chains + threads_per_block - 1) / threads_per_block;
-
-    size_t size = total_chains * 2 * PW_LEN;
-    uint64_t* d_out;
-    cudaMalloc(&d_out, sizeof(uint64_t) * total_chains * 2);
+    size_t size_bytes = sizeof(uint64_t) * total_chains * 2;
+    
+    uint64_t* d_out = nullptr;
+    if ((err = cudaMalloc(&d_out, size_bytes)) != cudaSuccess) {
+        fprintf(stderr, "Błąd alokacji pamięci GPU: %s\n", cudaGetErrorString(err));
+        return 8;
+    }
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
@@ -140,29 +170,47 @@ int main(int argc, char** argv) {
         kernel<<<blocks, threads_per_block>>>(d_out, total_chains, chain_len);
     }
 
-    cudaDeviceSynchronize();
+    if ((err = cudaDeviceSynchronize()) != cudaSuccess) {
+        fprintf(stderr, "Błąd synchronizacji GPU: %s\n", cudaGetErrorString(err));
+        cudaFree(d_out);
+        return 9;
+    }
+    
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
-
-    cudaError_t err = cudaGetLastError();
-    if (err != cudaSuccess) {
-        printf("CUDA ERROR: %s\n", cudaGetErrorString(err));
-    }
-
     float ms = 0;
     cudaEventElapsedTime(&ms, start, stop);
-
     printf("%s działał przez %.4f sekund.\n", sequential ? "Tryb sekwencyjny (GPU, 1 wątek)" : "GPU", ms / 1000.0);
 
-    char* h_out = new char[size];
-    cudaMemcpy(h_out, d_out, size, cudaMemcpyDeviceToHost);
+    char* h_out = new(std::nothrow) char[size_bytes];
+    if (!h_out) {
+        fprintf(stderr, "Błąd alokacji pamięci na host.\n");
+        cudaFree(d_out);
+        return 10;
+    }
+
+    if ((err = cudaMemcpy(h_out, d_out, size_bytes, cudaMemcpyDeviceToHost)) != cudaSuccess) {
+        fprintf(stderr, "Błąd kopiowania wyników z GPU: %s\n", cudaGetErrorString(err));
+        delete[] h_out;
+        cudaFree(d_out);
+        return 11;
+    }
+    
     FILE* f = fopen("output/rainbow_des.txt", "w");
+    if (!f) {
+        fprintf(stderr, "Nie można otworzyć pliku do zapisu.\n");
+        delete[] h_out;
+        cudaFree(d_out);
+        return 12;
+    }
+    
     for (int i = 0; i < total_chains; i++) {
         for (int j = 0; j < PW_LEN; j++) fputc(h_out[i * 2 * PW_LEN + j], f);
         fputc(':', f);
         for (int j = 0; j < PW_LEN; j++) fputc(h_out[i * 2 * PW_LEN + PW_LEN + j], f);
         fputc('\n', f);
     }
+
     fclose(f);
     delete[] h_out;
     cudaFree(d_out);
