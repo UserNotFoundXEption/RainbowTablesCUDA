@@ -11,10 +11,6 @@
 
 __device__ __constant__ uint64_t subkeys[16];
 
-int PC1_host[56];
-int SHIFTS_host[16];
-int PC2_host[48];
-
 __device__ uint64_t reduce(uint64_t block, int round) {
     uint64_t result = 0;
     for (int i = 0; i < PW_LEN; i++) {
@@ -135,19 +131,12 @@ int main(int argc, char** argv) {
 	return 5;
     }
 
-    cudaError_t err;
-    if ((err = cudaMemcpyToSymbol(PC1, PC1_host, sizeof(PC1_host))) != cudaSuccess ||
-        (err = cudaMemcpyToSymbol(SHIFTS, SHIFTS_host, sizeof(SHIFTS_host))) != cudaSuccess ||
-        (err = cudaMemcpyToSymbol(PC2, PC2_host, sizeof(PC2_host))) != cudaSuccess) {
-        fprintf(stderr, "Błąd kopiowania tablic do GPU: %s\n", cudaGetErrorString(err));
-        return 6;
-    }
-
     uint64_t h_subkeys[16];
     generate_subkeys(key, h_subkeys);
+    cudaError_t err;
     if ((err = cudaMemcpyToSymbol(subkeys, h_subkeys, sizeof(h_subkeys))) != cudaSuccess) {
         fprintf(stderr, "Błąd kopiowania kluczy do GPU: %s\n", cudaGetErrorString(err));
-        return 7;
+        return 6;
     }
 
     int blocks = sequential ? 1 : (total_chains + threads_per_block - 1) / threads_per_block;
@@ -156,7 +145,7 @@ int main(int argc, char** argv) {
     uint64_t* d_out = nullptr;
     if ((err = cudaMalloc(&d_out, size_bytes)) != cudaSuccess) {
         fprintf(stderr, "Błąd alokacji pamięci GPU: %s\n", cudaGetErrorString(err));
-        return 8;
+        return 7;
     }
 
     cudaEvent_t start, stop;
@@ -173,7 +162,7 @@ int main(int argc, char** argv) {
     if ((err = cudaDeviceSynchronize()) != cudaSuccess) {
         fprintf(stderr, "Błąd synchronizacji GPU: %s\n", cudaGetErrorString(err));
         cudaFree(d_out);
-        return 9;
+        return 8;
     }
     
     cudaEventRecord(stop, 0);
@@ -186,14 +175,14 @@ int main(int argc, char** argv) {
     if (!h_out) {
         fprintf(stderr, "Błąd alokacji pamięci na host.\n");
         cudaFree(d_out);
-        return 10;
+        return 9;
     }
 
     if ((err = cudaMemcpy(h_out, d_out, size_bytes, cudaMemcpyDeviceToHost)) != cudaSuccess) {
         fprintf(stderr, "Błąd kopiowania wyników z GPU: %s\n", cudaGetErrorString(err));
         delete[] h_out;
         cudaFree(d_out);
-        return 11;
+        return 10;
     }
     
     FILE* f = fopen("output/rainbow_des.txt", "w");
@@ -201,7 +190,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Nie można otworzyć pliku do zapisu.\n");
         delete[] h_out;
         cudaFree(d_out);
-        return 12;
+        return 11;
     }
     
     for (int i = 0; i < total_chains; i++) {
